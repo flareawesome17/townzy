@@ -1,0 +1,61 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Common functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isOrganizer() {
+      return isSignedIn() && 
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'organizer';
+    }
+    
+    function isImageType() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isValidFileSize() {
+      return request.resource.size <= 5 * 1024 * 1024; // 5MB max file size
+    }
+    
+    // User profile images
+    match /users/{userId}/{fileName} {
+      allow read;
+      allow write: if isOwner(userId) && isImageType() && isValidFileSize();
+    }
+    
+    // Event images
+    match /events/{eventId}/{fileName} {
+      allow read;
+      allow create: if isSignedIn() && (isOrganizer() || isAdmin()) && isImageType() && isValidFileSize();
+      allow update, delete: if isSignedIn() && 
+        (firestore.get(/databases/(default)/documents/events/$(eventId)).data.organizerId == request.auth.uid || isAdmin());
+    }
+    
+    // Post images
+    match /posts/{postId}/{fileName} {
+      allow read;
+      allow create: if isSignedIn() && isImageType() && isValidFileSize();
+      allow update, delete: if isSignedIn() && 
+        (firestore.get(/databases/(default)/documents/posts/$(postId)).data.authorId == request.auth.uid || isAdmin());
+    }
+    
+    // Public images
+    match /public/{fileName} {
+      allow read;
+      allow write: if isAdmin() && isImageType() && isValidFileSize();
+    }
+  }
+}
